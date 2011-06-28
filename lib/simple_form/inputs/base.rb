@@ -119,40 +119,44 @@ module SimpleForm
         html_options
       end
       
-      def class_active_authorizer
-        return nil unless object.class.respond_to?(:active_authorizer)
-        authorizer = object.class.active_authorizer
-        
-        # Rails 3.1 support
-        # active_authorizer returns a hash where key is :role, use :default
-        if authorizer.is_a?(Hash) && authorizer.has_key?(:default)
-          authorizer = authorizer[:default]
+      # The area of mass-assignment seems to be changing its API in Rails 3.1
+      #
+      # The 3.0 documented way to write custom code for the mass-assignment
+      # logic is to override the 'protected' method #mass_assignment_authorizer
+      # in your model. Therefore, if you want simple_form to run this custom
+      # logic, then the 'protected' method #mass_assignment_authorizer must be
+      # called to get the current 'authorizer'.  In 3.1 it seems likes hooks
+      # are being added to insert custom sanitizers.  Therefore, there will
+      # probably be a better way to get the current 'authorizer' ... although
+      # it won't be 3.0 compatible
+      
+      # This way of getting the authorizer will bypass any custom adjustments
+      # to #mass_assignment_authorizer
+      # def authorizer
+      #   return nil unless object.class.respond_to?(:active_authorizer)
+      #   authorizer = object.class.active_authorizer
+      #   
+      #   # Rails 3.1 support
+      #   # active_authorizer returns a hash where key is :role, use :default
+      #   if authorizer.is_a?(Hash) && authorizer.has_key?(:default)
+      #     authorizer = authorizer[:default]
+      #   end
+      #   authorizer
+      # end
+      
+      def authorizer
+        begin
+          # Rails 3.1 support
+          # role support added for 3.1, default to :default
+          object.send(:mass_assignment_authorizer, :default)
+        rescue ArgumentError
+          # Rails 3.0
+          object.send(:mass_assignment_authorizer)
         end
-        authorizer
       end
       
-      def class_uses_whitelist?
-        class_active_authorizer.is_a?(ActiveModel::MassAssignmentSecurity::WhiteList)
-      end
-
-      def class_uses_blacklist?
-        class_active_authorizer.is_a?(ActiveModel::MassAssignmentSecurity::BlackList)
-      end
-
-      def attribute_whitelisted?
-        class_uses_whitelist? &&
-          class_active_authorizer.include?(attribute_name.to_s)
-      end
-
-      def attribute_blacklisted?
-        class_uses_blacklist? &&
-          class_active_authorizer.include?(attribute_name.to_s)
-      end
-
       def attribute_protected?
-        return false unless SimpleForm.use_protected
-        # whitelist (attr_accessible), if used it has priority (like in Rails)
-        class_uses_whitelist? ? !attribute_whitelisted? : attribute_blacklisted?
+        SimpleForm.use_protected && authorizer.deny?(attribute_name.to_sym)
       end
 
       def protected_class
